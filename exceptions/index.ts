@@ -7,5 +7,6 @@ export default class SliceException extends Error {
 }
 
 export * from './InvalidDataException';
+export * from './InvalidOperationException';
 export * from './OutOfBoundsException';
 export * from './UnimplementedException';

@@ -1,12 +1,16 @@
 import { Buffer } from 'node:buffer';
-import BufferReader from './BufferReader';
-import { InvalidDataException, OutOfBoundsException } from './exceptions';
-import { UnimplementedException } from './exceptions/UnimplementedException';
 
-export enum SliceEncoding {
-  slice1 = 'Slice1',
-  slice2 = 'Slice2',
-}
+import {
+  InvalidDataException,
+  InvalidOperationException,
+  OutOfBoundsException,
+  UnimplementedException
+} from './exceptions';
+import BufferReader from './BufferReader';
+import { DecodeFunc } from './DecodeFunc';
+import { SliceEncoding } from './SliceEncoding';
+import Slice2Definitions from './Slice2Definitions';
+import { TagFormat } from './TagFormat';
 
 export default class SliceDecoder {
   private _reader:BufferReader;
@@ -122,7 +126,7 @@ export default class SliceDecoder {
       }
     }
 
-    throw new UnimplementedException(`${SliceEncoding.slice1} decoding not implemented.`);
+    throw new UnimplementedException(`Slice1 decoding not implemented.`);
   }
 
   public decodeString() : string {
@@ -140,5 +144,199 @@ export default class SliceDecoder {
       }
     }
     throw new OutOfBoundsException();
+  }
+
+  private static decodeVarInt62Length(from:number) : number {
+    return 1 << (from & 0x03);
+  }
+
+  private peekByte() : number {
+    return this._reader.read(1, true).readUInt8();
+  }
+
+  public skip(count:number) : void {
+    this._reader.advance(count);
+  } 
+
+  public skipSize() {
+    if(this.encoding === SliceEncoding.slice1) {
+      const chunk:number = this.decodeUInt8();
+      if(chunk === 255) {
+        this.skip(4);
+      } 
+    }
+    else {
+      this.skip(SliceDecoder.decodeVarInt62Length(this.peekByte()))
+    }
+  }
+
+  public decodeTagged<T>(
+    tag: number,
+    decodeFunc: DecodeFunc<T>,
+    tagFormat?:TagFormat,
+    useTagEndMarker?:boolean
+  ) : T | undefined {
+    if(!tagFormat && this.encoding === SliceEncoding.slice1) {
+      throw new InvalidOperationException("Slice1 encoded tags must be decoded with tag formats.");
+    }
+
+    if(tagFormat && this.encoding !== SliceEncoding.slice1) {
+      throw new InvalidOperationException("Tag formats can only be used with the Slice1 encoding.");
+    }
+
+    if(
+      this.encoding === SliceEncoding.slice1
+      && tagFormat
+      && this.decodeTagHeader(tag, tagFormat, !!useTagEndMarker)
+    ) {
+      if(tagFormat === TagFormat.VSize) {
+        this.skipSize();
+      } else if(tagFormat === TagFormat.FSize) {
+        this.skip(4);
+      }
+
+      return decodeFunc(this);
+
+    } else if(this.encoding === SliceEncoding.slice2) {
+      const requestedTag:number = tag;
+
+      while (true) {
+        const startPos : number = this._reader.getPosition();
+
+        tag = this.decodeVarInt32();
+
+        if (tag === requestedTag) {
+            // Found requested tag, so skip size:
+            this.skipSize();
+            return decodeFunc(this);
+        }
+        else if (tag == Slice2Definitions.tagEndMarker || tag > requestedTag) {
+          this._reader.rewind(this._reader.getPosition() - startPos);
+          break;
+        }
+        else {
+          this.skip(this.decodeSize());
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  public getBitSequenceReader(bitSequenceSize:number) : BufferReader {
+    if (this.encoding == SliceEncoding.slice1) {
+      throw new InvalidOperationException("Cannot create a bit sequence reader using the Slice1 encoding.");
+    }
+
+    if (bitSequenceSize <= 0)
+    {
+        throw new OutOfBoundsException('The bitSequenceSize argument must be greater than 0.');
+    }
+
+    //TODO: const size:number = SliceEncoder.getBitSequenceByteCount(bitSequenceSize);
+    const size:number = 1;
+    const buffer:Buffer = this._reader.getUnreadBuffer(size);
+    this._reader.advance(size);
+    return new BufferReader(buffer);
+  }
+  
+  public skipTagged(useTagEndMarker:boolean = true) : void {
+    if(this.encoding === SliceEncoding.slice1) {
+      // TODO: Implement Slice1
+      throw new UnimplementedException();
+    }
+    else {
+      while(true) {
+        if (this.decodeVarInt32() == Slice2Definitions.tagEndMarker) {
+          break;
+        }
+
+        this.skip(this.decodeSize());
+      }
+    }
+  }
+
+  private skipTaggedValue(format:TagFormat) : void {
+    if(this.encoding !== SliceEncoding.slice1) {
+      throw new InvalidDataException("Encoding must be Slice1.");
+    }
+
+    switch (format) {
+      case TagFormat.F1:
+        this.skip(1);
+        break;
+      case TagFormat.F2:
+        this.skip(2);
+        break;
+      case TagFormat.F4:
+        this.skip(4);
+        break;
+      case TagFormat.F8:
+        this.skip(8);
+        break;
+      case TagFormat.Size:
+        this.skipSize();
+        break;
+      case TagFormat.VSize:
+        this.skip(this.decodeSize());
+        break;
+      case TagFormat.FSize:
+        const size:number = this.decodeInt32();
+        if (size < 0){
+          throw new InvalidDataException(`Decoded invalid size: ${size}.`);
+        }
+
+        this.skip(size);
+        break;
+      default:
+        throw new InvalidDataException(`Cannot skip tagged field with tag format '${format}'.`);
+      }
+    }
+
+  public decodeTagHeader(tag:number, expectedFormat:TagFormat, useTagEndMarker:boolean) : boolean {
+    if(this.encoding !== SliceEncoding.slice1) {
+      throw new InvalidDataException("Encoding must be Slice1.");
+    }
+
+    const requestedTag:number = tag;
+
+    while(true) {
+      if(!useTagEndMarker && this._reader.end()) {
+        return false;
+      }
+
+      const savedPosition:number = this._reader.getPosition();
+
+      const v:number = this.decodeUInt8();
+      if(useTagEndMarker && v === Slice2Definitions.tagEndMarker) {
+        this._reader.rewind(savedPosition);
+        return false;
+      }
+
+      const format = v & 0x07 as TagFormat;
+      tag = v >> 3;
+      if(tag === 30) {
+        tag = this.decodeSize();
+      }
+
+      if(tag > requestedTag) {
+        this._reader.rewind(savedPosition);
+        return false;
+      }
+      else if (tag < requestedTag) {
+        this.skipTaggedValue(format);
+      }
+      else {
+        if(expectedFormat === TagFormat.OptimizedVSize) {
+          expectedFormat = TagFormat.VSize;
+        } 
+
+        if(format != expectedFormat) {
+          throw new InvalidDataException(`Invalid tag field '${tag}': unexpected format.`);
+        }
+
+        return true;
+      }
+    }
   }
 }
