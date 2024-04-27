@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { OutOfBoundsException } from './exceptions';
+import { OutOfBoundsException } from './exceptions/OutOfBoundsException.ts';
 
 export default class BufferReader {
   private _position:number = 0;
@@ -12,11 +12,12 @@ export default class BufferReader {
   }
 
   public read(size: number = 1, peek: boolean = false) : Buffer {
-    if(this._position + size > this._length) {
+    const newPosition = this._position + size;
+    if(newPosition > this._length) {
       throw new OutOfBoundsException();
     }
 
-    const buffer = this.buffer.subarray(this._position, this._length);
+    const buffer = this.buffer.subarray(this._position, newPosition);
 
     if(!peek) this._position += size;
 

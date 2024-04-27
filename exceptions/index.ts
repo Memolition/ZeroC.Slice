@@ -5,8 +5,9 @@ export default class SliceException extends Error {
         this.name = this.constructor.name;
     }
 }
-
-export * from './InvalidDataException';
-export * from './InvalidOperationException';
-export * from './OutOfBoundsException';
-export * from './UnimplementedException';
+/*
+export * from './InvalidDataException.ts';
+export * from './InvalidOperationException.ts';
+export * from './OutOfBoundsException.ts';
+export * from './UnimplementedException.ts';
+*/

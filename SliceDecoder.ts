@@ -1,16 +1,16 @@
 import { Buffer } from 'node:buffer';
 
-import {
-  InvalidDataException,
-  InvalidOperationException,
-  OutOfBoundsException,
-  UnimplementedException
-} from './exceptions';
-import BufferReader from './BufferReader';
-import { DecodeFunc } from './DecodeFunc';
-import { SliceEncoding } from './SliceEncoding';
-import Slice2Definitions from './Slice2Definitions';
-import { TagFormat } from './TagFormat';
+import { InvalidDataException } from './exceptions/InvalidDataException.ts';
+import { InvalidOperationException } from './exceptions/InvalidOperationException.ts';
+import { OutOfBoundsException } from './exceptions/OutOfBoundsException.ts';
+import { UnimplementedException } from './exceptions/UnimplementedException.ts';
+
+import BufferReader from './BufferReader.ts';
+import { DecodeFunc } from './DecodeFunc.ts';
+import { SliceEncoding } from './SliceEncoding.ts';
+import Slice2Definitions from './Slice2Definitions.ts';
+import { TagFormat } from './TagFormat.ts';
+import SliceEncoder from './SliceEncoder.ts';
 
 export default class SliceDecoder {
   private _reader:BufferReader;
@@ -233,8 +233,7 @@ export default class SliceDecoder {
         throw new OutOfBoundsException('The bitSequenceSize argument must be greater than 0.');
     }
 
-    //TODO: const size:number = SliceEncoder.getBitSequenceByteCount(bitSequenceSize);
-    const size:number = 1;
+    const size:number = SliceEncoder.getBitSequenceByteCount(bitSequenceSize);
     const buffer:Buffer = this._reader.getUnreadBuffer(size);
     this._reader.advance(size);
     return new BufferReader(buffer);
@@ -338,5 +337,7 @@ export default class SliceDecoder {
         return true;
       }
     }
+
+    return true;
   }
 }
